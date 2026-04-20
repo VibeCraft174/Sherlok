@@ -1,0 +1,7 @@
+{
+  "build": {
+    "commands": {
+      "predeploy": "git clone https://github.com/sherlock-project/sherlock.git /app/sherlock && pip install -r /app/sherlock/requirements.txt && git clone https://github.com/phend0/blackbird-osint.git /app/blackbird-osint && pip install -r /app/blackbird-osint/requirements.txt && git clone https://github.com/benchtown/holehe.git /app/holehe && pip install -r /app/holehe/requirements.txt"
+    }
+  }
+}
