@@ -9,19 +9,20 @@ from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, FSInputFile
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from config import BOT_TOKEN, ALLOWED_USERS, SHERLOCK_PATH, BLACKBIRD_PATH
+from config import BOT_TOKEN, ALLOWED_USERS, BLACKBIRD_PATH
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Правильная инициализация бота для aiogram 3.7+
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
-# Простое меню с одной кнопкой
+# Клавиатура с кнопками для удобства
 main_menu = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="🔍 Найти по username")]
+        [KeyboardButton(text="🔍 Поиск по username")],
+        [KeyboardButton(text="📧 Поиск по email")],
+        [KeyboardButton(text="❓ Помощь")]
     ],
     resize_keyboard=True
 )
@@ -38,30 +39,41 @@ async def cmd_start(message: types.Message):
         return
     await message.answer(
         "👋 Привет! Я бот для поиска публичных профилей.\n\n"
-        "Нажми кнопку «🔍 Найти по username» и введи никнейм.\n"
-        "Я проверю его на 700+ сайтах (Instagram, Twitter, TikTok и др.)",
+        "Нажми на кнопку и введи никнейм или email.\n"
+        "Проверю на 700+ сайтах.",
         reply_markup=main_menu
     )
 
-@dp.message(lambda msg: msg.text == "🔍 Найти по username")
+@dp.message(lambda msg: msg.text == "🔍 Поиск по username")
 async def ask_username(message: types.Message):
-    await message.answer("Введите username (например, elonmusk или @johndoe):")
+    await message.answer("Введите username (например, elonmusk):")
 
-@dp.message(lambda msg: msg.text and not msg.text.startswith("/") and msg.text != "🔍 Найти по username")
-async def search_username(message: types.Message):
-    username = message.text.strip().lstrip('@')
+@dp.message(lambda msg: msg.text == "📧 Поиск по email")
+async def ask_email(message: types.Message):
+    await message.answer("Введите email (например, example@gmail.com):")
+
+@dp.message(lambda msg: msg.text == "❓ Помощь")
+async def help_cmd(message: types.Message):
+    await cmd_start(message)
+
+@dp.message(lambda msg: msg.text and not msg.text.startswith("/") and msg.text not in ["🔍 Поиск по username", "📧 Поиск по email", "❓ Помощь"])
+async def search_handler(message: types.Message):
+    query = message.text.strip().lower()
+    is_email = "@" in query and "." in query.split("@")[-1]
+    if is_email:
+        await search_email(message, query)
+    else:
+        await search_username(message, query)
+
+async def search_username(message: types.Message, username: str):
     status_msg = await message.answer(f"🔍 Ищу <b>{username}</b>... Это может занять до минуты.")
 
     try:
         with tempfile.NamedTemporaryFile(mode='w+', suffix='.txt', delete=False) as tmp:
             report_path = tmp.name
 
-        # Используем Blackbird (700+ сайтов) если он есть, иначе Sherlock
-        if os.path.exists(BLACKBIRD_PATH):
-            cmd = f"cd {shlex.quote(BLACKBIRD_PATH)} && python -m blackbird -u {shlex.quote(username)} -o {shlex.quote(report_path)}"
-        else:
-            cmd = f"cd {shlex.quote(SHERLOCK_PATH)} && python -m sherlock {shlex.quote(username)} --output {shlex.quote(report_path)}"
-
+        # Используем Blackbird, он мощнее Sherlock
+        cmd = f"cd {shlex.quote(BLACKBIRD_PATH)} && python -m blackbird -u {shlex.quote(username)} -o {shlex.quote(report_path)}"
         process = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         await process.communicate()
 
@@ -83,9 +95,23 @@ async def search_username(message: types.Message):
         if os.path.exists(report_path):
             os.unlink(report_path)
 
-@dp.message(Command("help"))
-async def cmd_help(message: types.Message):
-    await cmd_start(message)
+async def search_email(message: types.Message, email: str):
+    await message.answer(f"🔍 Проверяю email <b>{email}</b>...")
+
+    try:
+        # Проверка через haveibeenpwned API
+        cmd = f"curl -s 'https://haveibeenpwned.com/api/v3/breachedaccount/{email}' -H 'hibp-api-key: YOUR_API_KEY'"
+        process = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        stdout, _ = await process.communicate()
+
+        if stdout:
+            breaches = stdout.decode('utf-8')
+            await message.answer(f"✅ Email <b>{email}</b> найден в утечках:\n<pre>{breaches}</pre>")
+        else:
+            await message.answer(f"❌ Email <b>{email}</b> не найден в публичных утечках.")
+    except Exception as e:
+        logger.exception("Ошибка проверки email")
+        await message.answer("⚠️ Ошибка при проверке email.")
 
 async def main():
     logger.info("Бот запущен и готов к работе")
