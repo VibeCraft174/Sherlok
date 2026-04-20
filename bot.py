@@ -1,58 +1,72 @@
 import asyncio
 import logging
 import subprocess
-import shlex
 import tempfile
 import os
+import shlex
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
+from aiogram.types import FSInputFile
 from config import BOT_TOKEN, ALLOWED_USERS, SHERLOCK_PATH
 
-# --- Настройка логирования ---
+# Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- Инициализация бота и диспетчера ---
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# --- Обработчик команды /start ---
+# Проверка доступа (если ALLOWED_USERS задан и не пуст)
+def is_allowed(user_id: int) -> bool:
+    if ALLOWED_USERS is None:
+        return True  # бот открыт для всех
+    return str(user_id) in ALLOWED_USERS
+
+# Обработчик /start
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    await message.answer("👋 Привет! Я OSINT-бот для поиска информации.\n\n"
-                         "Отправь мне команду `/search <username>` или "
-                         "`/mail <email>` для поиска.\n\n"
-                         "⚠️ Используй меня только в образовательных целях!",
-                         parse_mode="Markdown")
+    if not is_allowed(message.from_user.id):
+        await message.answer("🚫 Доступ запрещён.")
+        return
+    await message.answer(
+        "👋 Привет! Я OSINT-бот на основе Sherlock.\n\n"
+        "📌 Доступные команды:\n"
+        "/search <username> — поиск аккаунта по username на 300+ сайтах\n"
+        "/help — показать это сообщение\n\n"
+        "⚠️ Используй в образовательных целях."
+    )
 
-# --- Обработчик команды /search ---
+# Обработчик /help
+@dp.message(Command("help"))
+async def cmd_help(message: types.Message):
+    if not is_allowed(message.from_user.id):
+        await message.answer("🚫 Доступ запрещён.")
+        return
+    await cmd_start(message)  # просто показываем то же самое
+
+# Обработчик /search
 @dp.message(Command("search"))
 async def cmd_search(message: types.Message):
-    # 1. Проверка авторизации (белый список)
-    if str(message.from_user.id) not in ALLOWED_USERS:
-        await message.answer("🚫 У вас нет доступа к этому боту.")
+    if not is_allowed(message.from_user.id):
+        await message.answer("🚫 Доступ запрещён.")
         return
 
-    # 2. Получение username из команды
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
-        await message.answer("❌ Укажите username для поиска.\nПример: `/search janedoe`", parse_mode="Markdown")
+        await message.answer("❌ Укажите username для поиска.\nПример: `/search johndoe`", parse_mode="Markdown")
         return
     username = args[1].strip()
 
-    # 3. Уведомление о начале поиска
-    status_msg = await message.answer(f"🔍 Начинаю поиск для `{username}`...\nЭто может занять некоторое время.", parse_mode="Markdown")
+    status_msg = await message.answer(f"🔍 Ищу `{username}`... Это может занять до 30 секунд.", parse_mode="Markdown")
 
-    # 4. Выполнение поиска через Sherlock
     try:
-        # Создаем временный файл для отчета
-        with tempfile.NamedTemporaryFile(mode='w+', suffix='.txt', delete=False) as tmp_file:
-            report_path = tmp_file.name
+        # Создаём временный файл для результата
+        with tempfile.NamedTemporaryFile(mode='w+', suffix='.txt', delete=False) as tmp:
+            report_path = tmp.name
 
-        # Запускаем Sherlock. Используем shlex.quote для экранирования username.
-        # Команда: sherlock username --output /path/to/report.txt
+        # Запускаем Sherlock (предполагается, что он установлен в SHERLOCK_PATH)
         cmd = f"cd {shlex.quote(SHERLOCK_PATH)} && python -m sherlock {shlex.quote(username)} --output {shlex.quote(report_path)}"
-        logger.info(f"Running command: {cmd}")
+        logger.info(f"Executing: {cmd}")
 
         process = await asyncio.create_subprocess_shell(
             cmd,
@@ -63,49 +77,41 @@ async def cmd_search(message: types.Message):
 
         if process.returncode != 0:
             error_msg = stderr.decode('utf-8')
-            logger.error(f"Sherlock failed: {error_msg}")
-            await status_msg.edit_text(f"❌ Ошибка при выполнении поиска для `{username}`.\nВозможно, имя не найдено или проблема с сетью.", parse_mode="Markdown")
-            # Попробуем удалить временный файл в случае ошибки
-            try:
+            logger.error(f"Sherlock error: {error_msg}")
+            await status_msg.edit_text(f"❌ Ошибка при поиске `{username}`. Возможно, имя не найдено или проблемы с сетью.")
+            if os.path.exists(report_path):
                 os.unlink(report_path)
-            except:
-                pass
             return
 
-        # 5. Отправка результата
-        # Sherlock создает файл с результатами.
-        # Проверяем, существует ли файл и не пустой ли он.
+        # Проверяем, есть ли результаты
         if os.path.exists(report_path) and os.path.getsize(report_path) > 0:
-            # Читаем отчет
             with open(report_path, 'r', encoding='utf-8') as f:
-                report_content = f.read()
+                content = f.read()
             
-            # Если отчет слишком большой, отправляем файлом
-            if len(report_content) > 4000:
+            # Если результат большой — отправляем файлом
+            if len(content) > 3500:
                 await message.answer_document(
-                    types.input_file.FSInputFile(report_path, filename=f"{username}_report.txt"),
-                    caption=f"📄 Отчет по запросу `{username}`.", parse_mode="Markdown"
+                    FSInputFile(report_path, filename=f"{username}_sherlock.txt"),
+                    caption=f"📄 Результат для `{username}`"
                 )
                 await status_msg.delete()
             else:
-                await status_msg.edit_text(f"✅ Результат поиска для `{username}`:\n\n```\n{report_content}```", parse_mode="Markdown")
+                await status_msg.edit_text(f"✅ Найденные профили для `{username}`:\n\n```\n{content}```", parse_mode="Markdown")
         else:
-            await status_msg.edit_text(f"❌ Не найдено ни одного публичного профиля для `{username}`.", parse_mode="Markdown")
+            await status_msg.edit_text(f"❌ Не найдено ни одного публичного профиля для `{username}`.")
 
     except Exception as e:
-        logger.exception(f"Unexpected error: {e}")
-        await status_msg.edit_text("⚠️ Произошла непредвиденная внутренняя ошибка.")
+        logger.exception("Unexpected error")
+        await status_msg.edit_text("⚠️ Внутренняя ошибка. Попробуйте позже.")
     finally:
-        # Удаляем временный файл
-        try:
-            if os.path.exists(report_path):
-                os.unlink(report_path)
-        except:
-            pass
+        if os.path.exists(report_path):
+            os.unlink(report_path)
 
-# --- Запуск бота ---
+# (Опционально) Команда /email для поиска по email через haveibeenpwned API
+# Если хочешь добавить, дай знать — напишу отдельно.
+
 async def main():
-    logger.info("Starting OSINT bot...")
+    logger.info("Бот запущен и слушает команды...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
