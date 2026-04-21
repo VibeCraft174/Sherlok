@@ -1,7 +1,0 @@
-{
-  "build": {
-    "commands": {
-      "predeploy": "git clone https://github.com/phend0/blackbird-osint.git /app/blackbird-osint && pip install -r /app/blackbird-osint/requirements.txt"
-    }
-  }
-}
