@@ -13,7 +13,7 @@ API_HASH = os.getenv("API_HASH", "")            # Сюда вставьте ва
 # --- Elasticsearch (Bonsai) ---
 ELASTIC_HOST = os.getenv("ELASTIC_HOST", "https://disciplined-yew-1nybpwf4.us-east-1.bonsaisearch.net")
 ELASTIC_USERNAME = os.getenv("ELASTIC_USERNAME", "139adac7c0")
-ELASTIC_PASSWORD = os.getenv("ELASTIC_PASSWORD", "")   # Вставьте ваш пароль от Bonsai
+ELASTIC_PASSWORD = os.getenv("ELASTIC_PASSWORD", "Uskov140612")   # Вставьте ваш пароль от Bonsai
 
 # --- Разрешённые пользователи (оставьте пустым для всех) ---
 ALLOWED_USERS = None
