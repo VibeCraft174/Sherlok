@@ -1,5 +1,0 @@
-BOT_TOKEN=8581137449:AAFK3V7HzSxrrQjBtYH_ulNmCTIocPAhuHU
-# ID пользователей, которым разрешен доступ (можно узнать у бота @userinfobot)
-ALLOWED_USERS=1003998715803
-# Абсолютный путь к клонированному репозиторию sherlock-project/sherlock
-SHERLOCK_PATH=/home/user/sherlock
